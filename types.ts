@@ -55,3 +55,10 @@ export interface CalculationResult {
   monthlyIncome: number;
   affordability: number;
 }
+
+export interface SavedRecord {
+  id: string;
+  timestamp: number;
+  clientName: string;
+  data: FormData;
+}

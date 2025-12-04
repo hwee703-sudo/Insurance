@@ -1,11 +1,11 @@
-import React, { useState, useMemo } from 'react';
-import { User, DollarSign, ShieldAlert, PieChart, ArrowRight, ArrowLeft, Download, RefreshCcw, CheckCircle2, AlertCircle, Wallet } from 'lucide-react';
-import { FormData, BasicInfo, Liabilities, Expenses, ExistingCoverage, CalculationResult } from './types';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
+import { User, DollarSign, ShieldAlert, PieChart, ArrowLeft, RefreshCcw, CheckCircle2, AlertCircle, Wallet, ChevronDown, Calculator, Database, Save, Trash2, FolderOpen, Search, FileText } from 'lucide-react';
+import { FormData, BasicInfo, Liabilities, Expenses, ExistingCoverage, CalculationResult, SavedRecord } from './types';
 import { MoneyInput } from './components/MoneyInput';
+import { DateInput } from './components/DateInput';
 import { SectionCard } from './components/SectionCard';
 import { formatCurrency } from './utils/format';
-import { generateExcel } from './utils/excel';
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts';
+import { generatePDF } from './utils/pdf';
 
 const INITIAL_DATA: FormData = {
   basic: {
@@ -47,9 +47,63 @@ const INITIAL_DATA: FormData = {
   },
 };
 
+const DB_KEY = 'IGC_DB_RECORDS';
+
 export default function App() {
+  // --- Global State ---
+  const [activeTab, setActiveTab] = useState<'calculator' | 'database'>('calculator');
+  const [savedRecords, setSavedRecords] = useState<SavedRecord[]>([]);
+
+  // --- Calculator State ---
   const [formData, setFormData] = useState<FormData>(INITIAL_DATA);
   const [showResult, setShowResult] = useState(false);
+  const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
+
+  // --- Database Effects ---
+  useEffect(() => {
+    const loaded = localStorage.getItem(DB_KEY);
+    if (loaded) {
+      try {
+        setSavedRecords(JSON.parse(loaded));
+      } catch (e) {
+        console.error("Failed to parse DB", e);
+      }
+    }
+  }, []);
+
+  const saveToDb = () => {
+    if (!formData.basic.fullName) {
+        alert("Please enter a name before saving. / 请先输入客户姓名。");
+        return;
+    }
+    const newRecord: SavedRecord = {
+        id: crypto.randomUUID(),
+        timestamp: Date.now(),
+        clientName: formData.basic.fullName,
+        data: formData
+    };
+    
+    // Check if name exists to update or add new? For now, we just add new to keep history.
+    const updatedRecords = [newRecord, ...savedRecords];
+    setSavedRecords(updatedRecords);
+    localStorage.setItem(DB_KEY, JSON.stringify(updatedRecords));
+    alert("Saved successfully! / 保存成功！");
+  };
+
+  const deleteFromDb = (id: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (window.confirm("Are you sure you want to delete this record? / 确定要删除此记录吗？")) {
+        const updated = savedRecords.filter(r => r.id !== id);
+        setSavedRecords(updated);
+        localStorage.setItem(DB_KEY, JSON.stringify(updated));
+    }
+  };
+
+  const loadFromDb = (record: SavedRecord) => {
+      setFormData(record.data);
+      setShowResult(true);
+      setActiveTab('calculator');
+  };
 
   // --- Handlers ---
   const updateBasic = (field: keyof BasicInfo, value: any) => {
@@ -68,8 +122,14 @@ export default function App() {
     setFormData(prev => ({ ...prev, coverage: { ...prev.coverage, [field]: value } }));
   };
 
-  const handleExport = () => {
-    generateExcel(formData, results);
+  const handleExport = async () => {
+    setIsGeneratingPdf(true);
+    // Slight delay to allow state to render the hidden view if needed (though it's always rendered now)
+    setTimeout(async () => {
+        const safeName = formData.basic.fullName.replace(/[^a-z0-9]/gi, '_').substring(0, 20) || "Report";
+        await generatePDF('pdf-report-template', `Gap_Analysis_${safeName}`);
+        setIsGeneratingPdf(false);
+    }, 100);
   };
 
   // --- Calculations ---
@@ -99,357 +159,630 @@ export default function App() {
     };
   }, [formData]);
 
-  // --- Render Views ---
+  // --- PDF Template Component (Hidden) ---
+  const PdfTemplate = () => (
+    <div 
+        id="pdf-report-template" 
+        className="fixed top-0 bg-white overflow-hidden"
+        // Use left -10000px to move it off-screen but keep it 'rendered' in DOM for html2canvas
+        // z-index -1 sometimes causes issues if the background is opaque.
+        style={{ left: '-10000px', width: '210mm', minHeight: '297mm', padding: '15mm' }} 
+    >
+        {/* Header Bar */}
+        <div className="bg-indigo-600 text-white p-6 -mx-[15mm] -mt-[15mm] mb-6 flex justify-between items-center">
+             <div>
+                 <h1 className="text-2xl font-bold">Financial Gap Analysis</h1>
+                 <p className="opacity-80 text-sm">Professional Insurance Planning / 专业保险规划报告</p>
+             </div>
+             <div className="text-right">
+                 <div className="text-xl font-bold">{formData.basic.fullName || "Valued Client"}</div>
+                 <div className="text-xs opacity-80">{new Date().toLocaleDateString()}</div>
+             </div>
+        </div>
 
-  if (showResult) {
-    const debtCoveragePercent = Math.min(100, (formData.coverage.lifeTpd / results.totalLiabilities) * 100) || 0;
-    const ciCoveragePercent = Math.min(100, (formData.coverage.criticalIllness / results.totalCINeed) * 100) || 0;
-
-    return (
-      <div className="min-h-screen pb-20">
-        {/* Header */}
-        <header className="sticky top-0 z-20 bg-white/70 backdrop-blur-md border-b border-white/20 shadow-sm">
-            <div className="max-w-5xl mx-auto px-6 py-4 flex justify-between items-center">
-                <div className="flex items-center gap-2">
-                    <div className="bg-indigo-600 p-2 rounded-lg">
-                        <ShieldAlert className="w-5 h-5 text-white" />
-                    </div>
-                    <span className="font-bold text-gray-800 text-lg hidden sm:block">分析报告 Analysis Result</span>
+        {/* 3 Key Summary Cards */}
+        <div className="grid grid-cols-3 gap-4 mb-6">
+            {/* Debt Card */}
+            <div className={`p-4 rounded-xl border-2 ${results.debtShortfall > 0 ? 'bg-red-50 border-red-100' : 'bg-green-50 border-green-100'}`}>
+                <div className="text-[10px] text-slate-500 font-bold uppercase mb-1">Debt Gap 债务缺口</div>
+                <div className={`text-xl font-bold mb-1 ${results.debtShortfall > 0 ? 'text-red-600' : 'text-green-600'}`}>
+                    {formatCurrency(results.debtShortfall)}
                 </div>
-                <div className="flex gap-3">
-                    <button 
-                        onClick={handleExport}
-                        className="flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-full text-sm font-semibold transition-all shadow-lg shadow-emerald-600/20"
-                    >
-                        <Download className="w-4 h-4" /> 导出 Excel
-                    </button>
-                    <button 
-                        onClick={() => setShowResult(false)} 
-                        className="flex items-center gap-2 px-4 py-2 bg-white hover:bg-gray-50 text-gray-700 rounded-full text-sm font-semibold border border-gray-200 transition-all shadow-sm"
-                    >
-                        <ArrowLeft className="w-4 h-4" /> 返回 Edit
-                    </button>
+                <div className="text-[10px] text-slate-400">
+                    {results.debtShortfall > 0 ? 'Coverage Insufficient (不足)' : 'Fully Covered (充足)'}
                 </div>
             </div>
-        </header>
+             {/* CI Card */}
+             <div className={`p-4 rounded-xl border-2 ${results.ciShortfall > 0 ? 'bg-orange-50 border-orange-100' : 'bg-green-50 border-green-100'}`}>
+                <div className="text-[10px] text-slate-500 font-bold uppercase mb-1">CI Gap 重疾缺口</div>
+                <div className={`text-xl font-bold mb-1 ${results.ciShortfall > 0 ? 'text-orange-600' : 'text-green-600'}`}>
+                    {formatCurrency(results.ciShortfall)}
+                </div>
+                <div className="text-[10px] text-slate-400">
+                    {results.ciShortfall > 0 ? 'Coverage Insufficient (不足)' : 'Fully Covered (充足)'}
+                </div>
+            </div>
+             {/* Cashflow Card */}
+             <div className={`p-4 rounded-xl border-2 ${results.affordability < 0 ? 'bg-red-50 border-red-100' : 'bg-indigo-50 border-indigo-100'}`}>
+                <div className="text-[10px] text-slate-500 font-bold uppercase mb-1">Monthly Surplus 盈余</div>
+                <div className={`text-xl font-bold mb-1 ${results.affordability < 0 ? 'text-red-600' : 'text-indigo-600'}`}>
+                    {formatCurrency(results.affordability)}
+                </div>
+                <div className="text-[10px] text-slate-400">
+                    Income - Commitment
+                </div>
+            </div>
+        </div>
 
-        <main className="max-w-5xl mx-auto px-4 py-8 space-y-8">
+        {/* 2-Column Layout for Details */}
+        <div className="grid grid-cols-2 gap-6">
             
-            {/* User Header */}
-            <div className="text-center space-y-2 mb-8">
-                <h2 className="text-3xl font-bold text-slate-800">{formData.basic.fullName || "Valued Client"}</h2>
-                <p className="text-slate-500">Gap Analysis for Financial Security</p>
+            {/* Left Column: Liabilities & Expenses */}
+            <div className="space-y-6">
+                {/* Liabilities Table */}
+                <div>
+                    <h3 className="text-sm font-bold text-slate-700 mb-2 border-b pb-1">1. Liabilities (Debts) / 债务明细</h3>
+                    <table className="w-full text-xs">
+                        <tbody className="divide-y divide-slate-100">
+                            {(Object.entries(formData.liabilities) as [string, number][]).map(([k, v]) => v > 0 && (
+                                <tr key={k}>
+                                    <td className="py-1 text-slate-500 capitalize">{k.replace(/([A-Z])/g, ' $1').trim()}</td>
+                                    <td className="py-1 text-right font-medium">{formatCurrency(v)}</td>
+                                </tr>
+                            ))}
+                            <tr className="bg-slate-50">
+                                <td className="py-2 font-bold text-slate-700">Total Liabilities</td>
+                                <td className="py-2 text-right font-bold text-slate-700">{formatCurrency(results.totalLiabilities)}</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+
+                {/* Expenses Table */}
+                <div>
+                    <h3 className="text-sm font-bold text-slate-700 mb-2 border-b pb-1">2. Monthly Expenses / 开销明细</h3>
+                    <table className="w-full text-xs">
+                        <tbody className="divide-y divide-slate-100">
+                            {(Object.entries(formData.expenses) as [string, number][]).map(([k, v]) => v > 0 && (
+                                <tr key={k}>
+                                    <td className="py-1 text-slate-500 capitalize">{k.replace(/([A-Z])/g, ' $1').trim()}</td>
+                                    <td className="py-1 text-right font-medium">{formatCurrency(v)}</td>
+                                </tr>
+                            ))}
+                            <tr className="bg-slate-50">
+                                <td className="py-2 font-bold text-slate-700">Total Commitment</td>
+                                <td className="py-2 text-right font-bold text-slate-700">{formatCurrency(results.monthlyCommitment)}</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
             </div>
 
-            {/* Top Cards: Status Summary */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            {/* Right Column: Analysis Logic */}
+            <div className="space-y-6">
                 
-                {/* 1. DEBT GAP CARD */}
-                <div className={`relative overflow-hidden rounded-3xl p-6 border transition-all duration-300 ${results.debtShortfall > 0 ? 'bg-red-50/80 border-red-100 shadow-red-100' : 'bg-green-50/80 border-green-100 shadow-green-100'}`}>
-                    <div className="flex justify-between items-start mb-4">
-                        <div className={`p-3 rounded-2xl ${results.debtShortfall > 0 ? 'bg-red-100 text-red-600' : 'bg-green-100 text-green-600'}`}>
-                            {results.debtShortfall > 0 ? <AlertCircle className="w-6 h-6" /> : <CheckCircle2 className="w-6 h-6" />}
+                {/* Debt Analysis Block */}
+                <div className="bg-slate-50 p-4 rounded-lg">
+                    <h3 className="text-sm font-bold text-indigo-800 mb-3">Debt Protection Analysis</h3>
+                    <div className="space-y-2 text-xs">
+                        <div className="flex justify-between">
+                            <span>Total Debt (总债务)</span>
+                            <span className="font-semibold">{formatCurrency(results.totalLiabilities)}</span>
                         </div>
-                        <span className={`px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider ${results.debtShortfall > 0 ? 'bg-red-200/50 text-red-800' : 'bg-green-200/50 text-green-800'}`}>
-                            {results.debtShortfall > 0 ? 'Risk (有缺口)' : 'Secure (安全)'}
-                        </span>
+                        <div className="flex justify-between text-emerald-600">
+                            <span>Existing Coverage (现有)</span>
+                            <span>- {formatCurrency(formData.coverage.lifeTpd)}</span>
+                        </div>
+                        <div className="border-t border-slate-200 pt-2 flex justify-between font-bold text-sm">
+                            <span>Shortfall (缺口)</span>
+                            <span className={results.debtShortfall > 0 ? 'text-red-600' : 'text-slate-400'}>
+                                {formatCurrency(results.debtShortfall)}
+                            </span>
+                        </div>
                     </div>
-                    <h3 className="text-slate-500 text-sm font-medium uppercase tracking-wide">Debt Gap / 债务缺口</h3>
-                    <p className={`text-3xl font-extrabold mt-1 ${results.debtShortfall > 0 ? 'text-red-600' : 'text-green-600'}`}>
-                        {results.debtShortfall > 0 ? formatCurrency(results.debtShortfall) : 'RM 0'}
-                    </p>
-                    <p className="text-xs text-slate-400 mt-4">Total Liabilities: {formatCurrency(results.totalLiabilities)}</p>
                 </div>
 
-                {/* 2. CI GAP CARD */}
-                <div className={`relative overflow-hidden rounded-3xl p-6 border transition-all duration-300 ${results.ciShortfall > 0 ? 'bg-orange-50/80 border-orange-100 shadow-orange-100' : 'bg-green-50/80 border-green-100 shadow-green-100'}`}>
-                     <div className="flex justify-between items-start mb-4">
-                        <div className={`p-3 rounded-2xl ${results.ciShortfall > 0 ? 'bg-orange-100 text-orange-600' : 'bg-green-100 text-green-600'}`}>
-                            {results.ciShortfall > 0 ? <AlertCircle className="w-6 h-6" /> : <CheckCircle2 className="w-6 h-6" />}
+                 {/* CI Analysis Block */}
+                 <div className="bg-slate-50 p-4 rounded-lg">
+                    <h3 className="text-sm font-bold text-indigo-800 mb-3">Critical Illness Analysis</h3>
+                    <div className="space-y-2 text-xs">
+                        <div className="flex justify-between">
+                            <span>Monthly Expenses</span>
+                            <span>{formatCurrency(results.monthlyCommitment)}</span>
                         </div>
-                        <span className={`px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider ${results.ciShortfall > 0 ? 'bg-orange-200/50 text-orange-800' : 'bg-green-200/50 text-green-800'}`}>
-                            {results.ciShortfall > 0 ? 'Attention (需关注)' : 'Secure (安全)'}
-                        </span>
+                        <div className="flex justify-between">
+                            <span>Years Required (替代年数)</span>
+                            <span>x {formData.coverage.ciIncomeReplacementYears} Years</span>
+                        </div>
+                        <div className="border-t border-slate-200 my-1"></div>
+                        <div className="flex justify-between font-semibold">
+                            <span>Total Need (总需求)</span>
+                            <span>{formatCurrency(results.totalCINeed)}</span>
+                        </div>
+                         <div className="flex justify-between text-emerald-600">
+                            <span>Existing Coverage (现有)</span>
+                            <span>- {formatCurrency(formData.coverage.criticalIllness)}</span>
+                        </div>
+                        <div className="border-t border-slate-200 pt-2 flex justify-between font-bold text-sm">
+                            <span>Shortfall (缺口)</span>
+                            <span className={results.ciShortfall > 0 ? 'text-red-600' : 'text-slate-400'}>
+                                {formatCurrency(results.ciShortfall)}
+                            </span>
+                        </div>
                     </div>
-                    <h3 className="text-slate-500 text-sm font-medium uppercase tracking-wide">CI Gap / 重疾缺口</h3>
-                    <p className={`text-3xl font-extrabold mt-1 ${results.ciShortfall > 0 ? 'text-orange-600' : 'text-green-600'}`}>
-                        {results.ciShortfall > 0 ? formatCurrency(results.ciShortfall) : 'RM 0'}
-                    </p>
-                    <p className="text-xs text-slate-400 mt-4">Total Need: {formatCurrency(results.totalCINeed)}</p>
                 </div>
 
-                {/* 3. AFFORDABILITY CARD */}
-                <div className={`relative overflow-hidden rounded-3xl p-6 border bg-white/60 backdrop-blur-md border-white/40 shadow-sm`}>
-                     <div className="flex justify-between items-start mb-4">
-                        <div className="p-3 rounded-2xl bg-indigo-100 text-indigo-600">
-                            <Wallet className="w-6 h-6" />
+                {/* Affordability Block */}
+                <div className="bg-slate-50 p-4 rounded-lg">
+                    <h3 className="text-sm font-bold text-indigo-800 mb-3">Affordability Analysis</h3>
+                    <div className="space-y-2 text-xs">
+                        <div className="flex justify-between">
+                            <span>Est. Monthly Income (月入)</span>
+                            <span>{formatCurrency(results.monthlyIncome)}</span>
                         </div>
-                         <span className={`px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider ${results.affordability > 0 ? 'bg-indigo-100 text-indigo-800' : 'bg-gray-200 text-gray-800'}`}>
-                            Budget
-                        </span>
+                         <div className="flex justify-between">
+                            <span>Total Commitment (月销)</span>
+                            <span>- {formatCurrency(results.monthlyCommitment)}</span>
+                        </div>
+                         <div className="border-t border-slate-200 pt-2 flex justify-between font-bold text-sm">
+                            <span>Net Surplus (净盈余)</span>
+                            <span className={results.affordability < 0 ? 'text-red-600' : 'text-emerald-600'}>
+                                {formatCurrency(results.affordability)}
+                            </span>
+                        </div>
                     </div>
-                    <h3 className="text-slate-500 text-sm font-medium uppercase tracking-wide">Surplus / 可负担预算</h3>
-                    <p className={`text-3xl font-extrabold mt-1 ${results.affordability > 0 ? 'text-indigo-600' : 'text-slate-400'}`}>
-                        {formatCurrency(results.affordability)}
-                    </p>
-                    <p className="text-xs text-slate-400 mt-4">Income vs Expenses</p>
                 </div>
+
             </div>
+        </div>
 
-            {/* Detailed Analysis Section */}
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+        {/* Footer */}
+        <div className="absolute bottom-[15mm] left-[15mm] right-[15mm] text-center text-[10px] text-slate-400 border-t pt-2">
+            This report is generated for reference purposes only. Please consult a professional financial advisor for detailed planning.
+        </div>
+    </div>
+  );
+
+  // --- Sub-Components for Views ---
+
+  const CalculatorView = () => {
+    if (showResult) {
+        const debtCoveragePercent = Math.min(100, (formData.coverage.lifeTpd / results.totalLiabilities) * 100) || 0;
+        const ciCoveragePercent = Math.min(100, (formData.coverage.criticalIllness / results.totalCINeed) * 100) || 0;
+
+        return (
+          <div className="pb-32">
+            {/* Header */}
+            <header className="sticky top-0 z-20 bg-white/80 backdrop-blur-md border-b border-white/20 shadow-sm">
+                <div className="max-w-5xl mx-auto px-4 py-3 flex justify-between items-center">
+                    <div className="flex items-center gap-2">
+                         <button 
+                            onClick={() => setShowResult(false)} 
+                            className="p-2 -ml-2 hover:bg-slate-100 rounded-full transition-colors"
+                        >
+                            <ArrowLeft className="w-5 h-5 text-slate-600" />
+                        </button>
+                        <span className="font-bold text-slate-800">Report</span>
+                    </div>
+                    <div className="flex gap-2">
+                        <button 
+                            onClick={saveToDb}
+                            className="flex items-center gap-1 px-3 py-1.5 bg-indigo-100 hover:bg-indigo-200 text-indigo-700 rounded-full text-xs font-bold transition-colors"
+                        >
+                            <Save className="w-3.5 h-3.5" /> Save
+                        </button>
+                        <button 
+                            onClick={handleExport}
+                            disabled={isGeneratingPdf}
+                            className="flex items-center gap-1 px-3 py-1.5 bg-red-100 hover:bg-red-200 text-red-700 rounded-full text-xs font-bold transition-colors disabled:opacity-50"
+                        >
+                            {isGeneratingPdf ? '...' : <><FileText className="w-3.5 h-3.5" /> PDF</>}
+                        </button>
+                    </div>
+                </div>
+            </header>
+
+            <main className="max-w-5xl mx-auto px-4 py-8 space-y-6">
+                {/* User Header */}
+                <div className="text-center space-y-1 mb-6">
+                    <h2 className="text-2xl font-bold text-slate-800">{formData.basic.fullName || "Valued Client"}</h2>
+                    <p className="text-sm text-slate-500">Financial Gap Analysis Report</p>
+                </div>
+
+                {/* Top Cards: Status Summary */}
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    {/* 1. DEBT GAP CARD */}
+                    <div className={`relative overflow-hidden rounded-3xl p-5 border transition-all duration-300 ${results.debtShortfall > 0 ? 'bg-red-50/80 border-red-100' : 'bg-green-50/80 border-green-100'}`}>
+                        <div className="flex justify-between items-start mb-2">
+                            <span className="text-xs font-bold uppercase tracking-wider text-slate-500">Debt Gap 债务缺口</span>
+                            {results.debtShortfall > 0 ? <AlertCircle className="w-5 h-5 text-red-500" /> : <CheckCircle2 className="w-5 h-5 text-green-500" />}
+                        </div>
+                        <p className={`text-2xl font-extrabold ${results.debtShortfall > 0 ? 'text-red-600' : 'text-green-600'}`}>
+                            {results.debtShortfall > 0 ? formatCurrency(results.debtShortfall) : 'RM 0'}
+                        </p>
+                        <p className="text-xs text-slate-400 mt-1">Total Debt: {formatCurrency(results.totalLiabilities)}</p>
+                    </div>
+
+                    {/* 2. CI GAP CARD */}
+                    <div className={`relative overflow-hidden rounded-3xl p-5 border transition-all duration-300 ${results.ciShortfall > 0 ? 'bg-orange-50/80 border-orange-100' : 'bg-green-50/80 border-green-100'}`}>
+                         <div className="flex justify-between items-start mb-2">
+                            <span className="text-xs font-bold uppercase tracking-wider text-slate-500">CI Gap 重疾缺口</span>
+                            {results.ciShortfall > 0 ? <AlertCircle className="w-5 h-5 text-orange-500" /> : <CheckCircle2 className="w-5 h-5 text-green-500" />}
+                        </div>
+                        <p className={`text-2xl font-extrabold ${results.ciShortfall > 0 ? 'text-orange-600' : 'text-green-600'}`}>
+                            {results.ciShortfall > 0 ? formatCurrency(results.ciShortfall) : 'RM 0'}
+                        </p>
+                         <p className="text-xs text-slate-400 mt-1">Need: {formatCurrency(results.totalCINeed)}</p>
+                    </div>
+
+                    {/* 3. AFFORDABILITY CARD */}
+                    <div className={`relative overflow-hidden rounded-3xl p-5 border bg-white/60 backdrop-blur-md border-white/40 shadow-sm`}>
+                         <div className="flex justify-between items-start mb-2">
+                             <span className="text-xs font-bold uppercase tracking-wider text-slate-500">Surplus 预算盈余</span>
+                             <Wallet className="w-5 h-5 text-indigo-500" />
+                        </div>
+                        <p className={`text-2xl font-extrabold ${results.affordability > 0 ? 'text-indigo-600' : 'text-slate-400'}`}>
+                            {formatCurrency(results.affordability)}
+                        </p>
+                        <p className="text-xs text-slate-400 mt-1">Income - Expenses</p>
+                    </div>
+                </div>
+
+                {/* Detailed Analysis Section */}
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                    {/* Debt Analysis Detail */}
+                    <div className="bg-white/70 backdrop-blur-xl rounded-3xl shadow-sm border border-white/50 p-6">
+                        <h3 className="text-base font-bold text-slate-800 mb-4 flex items-center gap-2">
+                            <div className="w-1 h-5 bg-red-500 rounded-full"></div> 
+                            Debt Analysis <span className="text-slate-400 font-normal text-xs">债务分析</span>
+                        </h3>
+                        
+                        <div className="space-y-4">
+                             {/* Progress Bar */}
+                             <div>
+                                <div className="flex justify-between text-xs mb-1.5 font-medium">
+                                    <span className="text-slate-500">Covered {debtCoveragePercent.toFixed(0)}%</span>
+                                </div>
+                                <div className="w-full bg-slate-100 rounded-full h-2 overflow-hidden">
+                                    <div className="bg-emerald-500 h-full rounded-full" style={{ width: `${debtCoveragePercent}%` }}></div>
+                                </div>
+                             </div>
+
+                             {/* List Items */}
+                             <div className="space-y-2 text-sm">
+                                 <div className="flex justify-between">
+                                     <span className="text-slate-500">Total / 总债务</span>
+                                     <span className="font-semibold">{formatCurrency(results.totalLiabilities)}</span>
+                                 </div>
+                                 <div className="flex justify-between">
+                                     <span className="text-slate-500">Existing / 现有</span>
+                                     <span className="font-medium text-emerald-600">-{formatCurrency(formData.coverage.lifeTpd)}</span>
+                                 </div>
+                                 <div className="border-t border-slate-100 my-1"></div>
+                                 <div className="flex justify-between">
+                                     <span className="font-bold text-slate-700">Shortfall / 缺口</span>
+                                     <span className={`font-bold ${results.debtShortfall > 0 ? 'text-red-600' : 'text-emerald-600'}`}>
+                                        {formatCurrency(results.debtShortfall)}
+                                     </span>
+                                 </div>
+                             </div>
+                        </div>
+                    </div>
+
+                    {/* CI Analysis Detail */}
+                    <div className="bg-white/70 backdrop-blur-xl rounded-3xl shadow-sm border border-white/50 p-6">
+                        <h3 className="text-base font-bold text-slate-800 mb-4 flex items-center gap-2">
+                            <div className="w-1 h-5 bg-orange-500 rounded-full"></div> 
+                            CI Analysis <span className="text-slate-400 font-normal text-xs">重疾分析</span>
+                        </h3>
+                        
+                        <div className="space-y-4">
+                             {/* Progress Bar */}
+                             <div>
+                                <div className="flex justify-between text-xs mb-1.5 font-medium">
+                                    <span className="text-slate-500">Covered {ciCoveragePercent.toFixed(0)}%</span>
+                                </div>
+                                <div className="w-full bg-slate-100 rounded-full h-2 overflow-hidden">
+                                    <div className="bg-purple-500 h-full rounded-full" style={{ width: `${ciCoveragePercent}%` }}></div>
+                                </div>
+                             </div>
+
+                             {/* List Items */}
+                             <div className="space-y-2 text-sm">
+                                 <div className="flex justify-between">
+                                     <span className="text-slate-500">Total Need / 总需求</span>
+                                     <span className="font-semibold">{formatCurrency(results.totalCINeed)}</span>
+                                 </div>
+                                 <div className="flex justify-between">
+                                     <span className="text-slate-500">Existing / 现有</span>
+                                     <span className="font-medium text-purple-600">-{formatCurrency(formData.coverage.criticalIllness)}</span>
+                                 </div>
+                                 <div className="border-t border-slate-100 my-1"></div>
+                                 <div className="flex justify-between">
+                                     <span className="font-bold text-slate-700">Shortfall / 缺口</span>
+                                     <span className={`font-bold ${results.ciShortfall > 0 ? 'text-red-600' : 'text-emerald-600'}`}>
+                                        {formatCurrency(results.ciShortfall)}
+                                     </span>
+                                 </div>
+                             </div>
+                        </div>
+                    </div>
+                </div>
                 
-                {/* Debt Analysis Detail */}
-                <div className="bg-white/70 backdrop-blur-xl rounded-3xl shadow-sm border border-white/50 p-8">
-                    <h3 className="text-lg font-bold text-slate-800 mb-6 flex items-center gap-2">
-                        <span className="w-1 h-6 bg-red-500 rounded-full"></span> 
-                        Debt Coverage Analysis <span className="text-slate-400 font-normal text-sm ml-auto">债务保障分析</span>
-                    </h3>
-                    
-                    <div className="space-y-6">
-                         {/* Progress Bar */}
-                         <div>
-                            <div className="flex justify-between text-sm mb-2 font-medium">
-                                <span className="text-slate-600">Covered / 已保障</span>
-                                <span className="text-slate-900">{debtCoveragePercent.toFixed(0)}%</span>
-                            </div>
-                            <div className="w-full bg-slate-100 rounded-full h-3 overflow-hidden">
-                                <div className="bg-emerald-500 h-full rounded-full transition-all duration-1000 ease-out" style={{ width: `${debtCoveragePercent}%` }}></div>
-                            </div>
-                         </div>
-
-                         {/* List Items */}
-                         <div className="space-y-3 bg-slate-50/50 p-4 rounded-2xl">
-                             <div className="flex justify-between items-center text-sm">
-                                 <span className="text-slate-500">Total Liabilities / 总债务</span>
-                                 <span className="font-bold text-slate-800">{formatCurrency(results.totalLiabilities)}</span>
-                             </div>
-                             <div className="flex justify-between items-center text-sm">
-                                 <span className="text-slate-500">Existing Coverage / 现有保障</span>
-                                 <span className="font-medium text-emerald-600">-{formatCurrency(formData.coverage.lifeTpd)}</span>
-                             </div>
-                             <div className="border-t border-slate-200 my-2"></div>
-                             <div className="flex justify-between items-center">
-                                 <span className="font-bold text-slate-700">Shortfall / 缺口</span>
-                                 <span className={`font-bold text-lg ${results.debtShortfall > 0 ? 'text-red-600' : 'text-emerald-600'}`}>
-                                    {formatCurrency(results.debtShortfall)}
-                                 </span>
-                             </div>
-                         </div>
-                    </div>
+                <div className="flex justify-center pt-4">
+                    <button 
+                        onClick={() => {
+                            setFormData(INITIAL_DATA);
+                            setShowResult(false);
+                            window.scrollTo(0,0);
+                        }}
+                        className="flex items-center gap-2 text-slate-400 hover:text-indigo-600 transition-colors font-medium text-sm"
+                    >
+                        <RefreshCcw className="w-4 h-4" /> Start New Calculation
+                    </button>
                 </div>
+            </main>
+          </div>
+        );
+    }
 
-                {/* CI Analysis Detail */}
-                <div className="bg-white/70 backdrop-blur-xl rounded-3xl shadow-sm border border-white/50 p-8">
-                    <h3 className="text-lg font-bold text-slate-800 mb-6 flex items-center gap-2">
-                        <span className="w-1 h-6 bg-orange-500 rounded-full"></span> 
-                        Critical Illness Analysis <span className="text-slate-400 font-normal text-sm ml-auto">重疾保障分析</span>
-                    </h3>
-                    
-                    <div className="space-y-6">
-                         {/* Progress Bar */}
-                         <div>
-                            <div className="flex justify-between text-sm mb-2 font-medium">
-                                <span className="text-slate-600">Covered / 已保障</span>
-                                <span className="text-slate-900">{ciCoveragePercent.toFixed(0)}%</span>
-                            </div>
-                            <div className="w-full bg-slate-100 rounded-full h-3 overflow-hidden">
-                                <div className="bg-purple-500 h-full rounded-full transition-all duration-1000 ease-out" style={{ width: `${ciCoveragePercent}%` }}></div>
-                            </div>
-                         </div>
-
-                         {/* List Items */}
-                         <div className="space-y-3 bg-slate-50/50 p-4 rounded-2xl">
-                             <div className="flex justify-between items-center text-sm">
-                                 <span className="text-slate-500">Monthly Expenses / 每月开销</span>
-                                 <span className="font-medium text-slate-700">{formatCurrency(results.monthlyCommitment)}</span>
-                             </div>
-                             <div className="flex justify-between items-center text-sm">
-                                 <span className="text-slate-500">Replacement Period / 替代期</span>
-                                 <span className="font-medium text-slate-700">{formData.coverage.ciIncomeReplacementYears} Years</span>
-                             </div>
-                             <div className="flex justify-between items-center text-sm">
-                                 <span className="text-slate-500 font-bold">Total CI Needed / 总需求</span>
-                                 <span className="font-bold text-slate-800">{formatCurrency(results.totalCINeed)}</span>
-                             </div>
-                             <div className="flex justify-between items-center text-sm">
-                                 <span className="text-slate-500">Existing Coverage / 现有保障</span>
-                                 <span className="font-medium text-purple-600">-{formatCurrency(formData.coverage.criticalIllness)}</span>
-                             </div>
-                             <div className="border-t border-slate-200 my-2"></div>
-                             <div className="flex justify-between items-center">
-                                 <span className="font-bold text-slate-700">Shortfall / 缺口</span>
-                                 <span className={`font-bold text-lg ${results.ciShortfall > 0 ? 'text-red-600' : 'text-emerald-600'}`}>
-                                    {formatCurrency(results.ciShortfall)}
-                                 </span>
-                             </div>
-                         </div>
-                    </div>
-                </div>
-
+    // Form View
+    return (
+        <div className="pb-32 pt-8 px-4 sm:px-6">
+          <div className="max-w-3xl mx-auto">
+            
+            {/* Title Section */}
+            <div className="text-center space-y-3 mb-8">
+              <div className="inline-flex items-center justify-center p-3 bg-indigo-600 rounded-2xl shadow-lg shadow-indigo-500/30 mb-2">
+                 <PieChart className="w-8 h-8 text-white" />
+              </div>
+              <h1 className="text-3xl font-extrabold text-slate-800 tracking-tight">Gap Calculator</h1>
+              <p className="text-slate-500 text-sm font-medium">专业保险缺口计算器</p>
             </div>
 
-            {/* Bottom Action */}
-            <div className="flex justify-center mt-12">
-                 <button 
-                    onClick={() => {
-                        setFormData(INITIAL_DATA);
-                        setShowResult(false);
-                    }}
-                    className="flex items-center gap-2 text-slate-400 hover:text-indigo-600 transition-colors font-medium text-sm"
+            {/* 1. Basic Info */}
+            <SectionCard title="Basic Info 基本资料" icon={User}>
+              <div className="flex flex-col space-y-2">
+                <label className="text-sm font-semibold text-slate-600">Name 姓名</label>
+                <input 
+                  type="text" 
+                  className="block w-full rounded-xl border-slate-200 bg-white/50 p-3 text-slate-900 placeholder-slate-300 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 focus:bg-white transition-all shadow-sm"
+                  value={formData.basic.fullName}
+                  onChange={(e) => updateBasic('fullName', e.target.value)}
+                  placeholder="e.g. John Doe"
+                />
+              </div>
+              <div className="flex flex-col space-y-2">
+                <label className="text-sm font-semibold text-slate-600">Contact 联络号码</label>
+                <input 
+                  type="tel" 
+                  className="block w-full rounded-xl border-slate-200 bg-white/50 p-3 text-slate-900 placeholder-slate-300 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 focus:bg-white transition-all shadow-sm"
+                  value={formData.basic.contactNumber}
+                  onChange={(e) => updateBasic('contactNumber', e.target.value)}
+                  placeholder="+60..."
+                />
+              </div>
+              <DateInput 
+                 label="DOB 出生日期" 
+                 value={formData.basic.dob} 
+                 onChange={(v) => updateBasic('dob', v)} 
+              />
+              <div className="flex flex-col space-y-2">
+                <label className="text-sm font-semibold text-slate-600">Gender 性别</label>
+                <div
+                    onClick={() => updateBasic('gender', formData.basic.gender === 'Male' ? 'Female' : 'Male')}
+                    className="relative block w-full rounded-xl border border-slate-200 bg-white/50 p-3 text-slate-900 cursor-pointer shadow-sm hover:bg-white active:scale-[0.99] transition-all group select-none"
                 >
-                    <RefreshCcw className="w-4 h-4" /> Start New Calculation / 开始新计算
+                    <div className="flex justify-between items-center">
+                        <span className="font-medium">
+                            {formData.basic.gender === 'Male' ? 'Male / 男' : 'Female / 女'}
+                        </span>
+                        <ChevronDown className="w-5 h-5 text-slate-400" />
+                    </div>
+                </div>
+              </div>
+               <MoneyInput label="Annual Income 年收入" value={formData.basic.annualIncome} onChange={(v) => updateBasic('annualIncome', v)} />
+            </SectionCard>
+
+            {/* 2. Liabilities */}
+            <SectionCard title="Liabilities 债务" icon={DollarSign}>
+              <MoneyInput label="Housing Loan 房贷" value={formData.liabilities.housingLoan} onChange={(v) => updateLiability('housingLoan', v)} />
+              <MoneyInput label="Car Loan 车贷" value={formData.liabilities.carLoan} onChange={(v) => updateLiability('carLoan', v)} />
+              <MoneyInput label="Personal Loan 个人贷款" value={formData.liabilities.personalLoan} onChange={(v) => updateLiability('personalLoan', v)} />
+              <MoneyInput label="Credit Card 信用卡" value={formData.liabilities.creditCard} onChange={(v) => updateLiability('creditCard', v)} />
+              <MoneyInput label="Business Loan 生意贷款" value={formData.liabilities.businessLoan} onChange={(v) => updateLiability('businessLoan', v)} />
+              <MoneyInput label="Study Loan 学贷" value={formData.liabilities.studyLoan} onChange={(v) => updateLiability('studyLoan', v)} />
+              <MoneyInput label="Others 其他" value={formData.liabilities.otherLiabilities} onChange={(v) => updateLiability('otherLiabilities', v)} />
+              
+              <div className="md:col-span-2 bg-indigo-50/50 rounded-xl p-3 flex justify-between items-center mt-2 border border-indigo-100">
+                <span className="font-semibold text-indigo-700 text-sm">Total Debt 总债务</span>
+                <span className="font-bold text-indigo-800">
+                  {formatCurrency((Object.values(formData.liabilities) as number[]).reduce((a, b) => a + b, 0))}
+                </span>
+              </div>
+            </SectionCard>
+
+            {/* 3. Expenses */}
+            <SectionCard title="Expenses 开销" icon={PieChart}>
+              <MoneyInput label="Housing Pay 房贷供期" value={formData.expenses.housingInstallment} onChange={(v) => updateExpense('housingInstallment', v)} />
+              <MoneyInput label="Car Pay 车贷供期" value={formData.expenses.carInstallment} onChange={(v) => updateExpense('carInstallment', v)} />
+              <MoneyInput label="Credit Card Pay 信用卡" value={formData.expenses.creditCardPayment} onChange={(v) => updateExpense('creditCardPayment', v)} />
+              <MoneyInput label="Groceries 伙食费" value={formData.expenses.foodGroceries} onChange={(v) => updateExpense('foodGroceries', v)} />
+              <MoneyInput label="Utilities 水电费" value={formData.expenses.utilities} onChange={(v) => updateExpense('utilities', v)} />
+              <MoneyInput label="Telco 电话网络" value={formData.expenses.phoneInternet} onChange={(v) => updateExpense('phoneInternet', v)} />
+              <MoneyInput label="Education 教育" value={formData.expenses.childrenEducation} onChange={(v) => updateExpense('childrenEducation', v)} />
+              <MoneyInput label="Insurance 保费" value={formData.expenses.insurancePremium} onChange={(v) => updateExpense('insurancePremium', v)} />
+              <MoneyInput label="Transport 交通" value={formData.expenses.transport} onChange={(v) => updateExpense('transport', v)} />
+              <MoneyInput label="Parents 父母" value={formData.expenses.parentsAllowance} onChange={(v) => updateExpense('parentsAllowance', v)} />
+              <MoneyInput label="Childcare 托儿" value={formData.expenses.childcare} onChange={(v) => updateExpense('childcare', v)} />
+              <MoneyInput label="Fun 娱乐" value={formData.expenses.entertainment} onChange={(v) => updateExpense('entertainment', v)} />
+              <MoneyInput label="Savings 储蓄" value={formData.expenses.savings} onChange={(v) => updateExpense('savings', v)} />
+              <MoneyInput label="Others 其他" value={formData.expenses.others} onChange={(v) => updateExpense('others', v)} />
+
+              <div className="md:col-span-2 bg-indigo-50/50 rounded-xl p-3 flex justify-between items-center mt-2 border border-indigo-100">
+                <span className="font-semibold text-indigo-700 text-sm">Total Exp 总开销</span>
+                <span className="font-bold text-indigo-800">
+                  {formatCurrency((Object.values(formData.expenses) as number[]).reduce((a, b) => a + b, 0))}
+                </span>
+              </div>
+            </SectionCard>
+
+            {/* 4. Coverage */}
+            <SectionCard title="Coverage 现有保障" icon={ShieldAlert}>
+              <MoneyInput label="Life/TPD 人寿" value={formData.coverage.lifeTpd} onChange={(v) => updateCoverage('lifeTpd', v)} />
+              <MoneyInput label="Critical Illness 重疾" value={formData.coverage.criticalIllness} onChange={(v) => updateCoverage('criticalIllness', v)} />
+              
+              <div className="flex flex-col space-y-2 md:col-span-2">
+                <label className="text-sm font-semibold text-slate-600">CI Replacement Years 重疾替代年数</label>
+                <div className="grid grid-cols-3 gap-3">
+                  {[3, 4, 5].map((year) => (
+                    <button
+                      key={year}
+                      onClick={() => updateCoverage('ciIncomeReplacementYears', year)}
+                      className={`py-3 rounded-xl border font-semibold transition-all shadow-sm ${
+                        formData.coverage.ciIncomeReplacementYears === year
+                          ? 'bg-indigo-600 border-indigo-600 text-white ring-2 ring-indigo-200'
+                          : 'bg-white border-slate-200 text-slate-600 hover:border-indigo-400 hover:text-indigo-600'
+                      }`}
+                    >
+                      {year} Yrs
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </SectionCard>
+
+            {/* Action Button */}
+            <div className="mt-8 mb-4">
+                <button
+                onClick={() => setShowResult(true)}
+                className="w-full bg-gradient-to-r from-indigo-600 to-purple-600 text-white py-4 rounded-2xl font-bold text-lg shadow-xl shadow-indigo-600/30 hover:shadow-indigo-600/50 hover:scale-[1.02] active:scale-[0.98] transition-all flex items-center justify-center gap-2"
+                >
+                <Calculator className="w-5 h-5" />
+                Calculate / 计算
                 </button>
             </div>
-
-        </main>
-      </div>
+          </div>
+        </div>
     );
+  };
+
+  const DatabaseView = () => {
+      const [searchTerm, setSearchTerm] = useState('');
+      
+      const filteredRecords = savedRecords.filter(r => 
+          r.clientName.toLowerCase().includes(searchTerm.toLowerCase()) || 
+          r.data.basic.contactNumber.includes(searchTerm)
+      );
+
+      return (
+          <div className="min-h-screen pb-32 bg-slate-50">
+              <header className="sticky top-0 z-20 bg-white/80 backdrop-blur-md border-b border-white/20 shadow-sm">
+                  <div className="max-w-5xl mx-auto px-6 py-4">
+                      <h2 className="text-xl font-bold text-slate-800 flex items-center gap-2">
+                          <Database className="w-6 h-6 text-indigo-600" />
+                          Client Database
+                      </h2>
+                  </div>
+              </header>
+
+              <main className="max-w-5xl mx-auto px-4 py-6">
+                  {/* Search */}
+                  <div className="relative mb-6">
+                      <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 w-5 h-5" />
+                      <input 
+                          type="text"
+                          placeholder="Search name or phone... / 搜索姓名或电话"
+                          className="w-full pl-12 pr-4 py-3 rounded-xl border border-slate-200 shadow-sm focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none"
+                          value={searchTerm}
+                          onChange={(e) => setSearchTerm(e.target.value)}
+                      />
+                  </div>
+
+                  {/* List */}
+                  {savedRecords.length === 0 ? (
+                      <div className="flex flex-col items-center justify-center py-20 text-slate-400">
+                          <FolderOpen className="w-16 h-16 mb-4 opacity-50" />
+                          <p>No records found. / 暂无记录。</p>
+                          <p className="text-sm mt-2">Calculated results will appear here after saving.</p>
+                      </div>
+                  ) : filteredRecords.length === 0 ? (
+                      <div className="text-center py-10 text-slate-400">
+                          <p>No matches found.</p>
+                      </div>
+                  ) : (
+                      <div className="grid gap-4">
+                          {filteredRecords.map((record) => (
+                              <div key={record.id} className="bg-white p-5 rounded-2xl shadow-sm border border-slate-100 flex items-center justify-between group active:scale-[0.99] transition-all">
+                                  <div className="flex-1 min-w-0" onClick={() => loadFromDb(record)}>
+                                      <div className="flex items-center gap-2 mb-1">
+                                          <h3 className="font-bold text-slate-800 truncate">{record.clientName}</h3>
+                                          <span className="text-xs bg-slate-100 px-2 py-0.5 rounded-full text-slate-500">
+                                              {new Date(record.timestamp).toLocaleDateString()}
+                                          </span>
+                                      </div>
+                                      <div className="flex items-center text-sm text-slate-500 gap-3">
+                                          <span className="flex items-center gap-1">
+                                              <FileText className="w-3.5 h-3.5" />
+                                              Inc: {formatCurrency(record.data.basic.annualIncome)}
+                                          </span>
+                                      </div>
+                                  </div>
+                                  <div className="flex items-center gap-3 pl-4 border-l border-slate-100 ml-4">
+                                      <button 
+                                          onClick={() => loadFromDb(record)}
+                                          className="p-2 bg-indigo-50 text-indigo-600 rounded-full hover:bg-indigo-100 transition-colors"
+                                      >
+                                          <FolderOpen className="w-5 h-5" />
+                                      </button>
+                                      <button 
+                                          onClick={(e) => deleteFromDb(record.id, e)}
+                                          className="p-2 bg-red-50 text-red-500 rounded-full hover:bg-red-100 transition-colors"
+                                      >
+                                          <Trash2 className="w-5 h-5" />
+                                      </button>
+                                  </div>
+                              </div>
+                          ))}
+                      </div>
+                  )}
+              </main>
+          </div>
+      )
   }
 
-  // --- Form View ---
+  // --- Main Render ---
   return (
-    <div className="min-h-screen py-10 px-4 sm:px-6">
-      <div className="max-w-3xl mx-auto">
+    <div className="min-h-screen bg-slate-50 font-sans text-slate-900">
         
-        {/* Title Section */}
-        <div className="text-center space-y-4 mb-12">
-          <div className="inline-flex items-center justify-center p-4 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-3xl shadow-xl shadow-indigo-500/30 mb-2">
-             <PieChart className="w-10 h-10 text-white" />
-          </div>
-          <h1 className="text-4xl font-extrabold text-slate-800 tracking-tight">Insurance Gap Calculator</h1>
-          <p className="text-slate-500 font-medium">保险缺口计算器</p>
-        </div>
+        {/* Render PDF Template Hidden */}
+        <PdfTemplate />
 
-        {/* 1. Basic Info */}
-        <SectionCard title="基本资料 Basic Info" icon={User} description="Personal details / 个人及收入信息">
-          <div className="flex flex-col space-y-2">
-            <label className="text-sm font-semibold text-slate-600">姓名 Full Name</label>
-            <input 
-              type="text" 
-              className="block w-full rounded-xl border-slate-200 bg-white/50 p-3 text-slate-900 placeholder-slate-300 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 focus:bg-white transition-all shadow-sm"
-              value={formData.basic.fullName}
-              onChange={(e) => updateBasic('fullName', e.target.value)}
-              placeholder="e.g. John Doe"
-            />
-          </div>
-          <div className="flex flex-col space-y-2">
-            <label className="text-sm font-semibold text-slate-600">联络号码 Contact Number</label>
-            <input 
-              type="tel" 
-              className="block w-full rounded-xl border-slate-200 bg-white/50 p-3 text-slate-900 placeholder-slate-300 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 focus:bg-white transition-all shadow-sm"
-              value={formData.basic.contactNumber}
-              onChange={(e) => updateBasic('contactNumber', e.target.value)}
-              placeholder="+60..."
-            />
-          </div>
-          <div className="flex flex-col space-y-2">
-            <label className="text-sm font-semibold text-slate-600">出生日期 Date of Birth</label>
-            <input 
-              type="date" 
-              className="block w-full rounded-xl border-slate-200 bg-white/50 p-3 text-slate-900 placeholder-slate-300 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 focus:bg-white transition-all shadow-sm"
-              value={formData.basic.dob}
-              onChange={(e) => updateBasic('dob', e.target.value)}
-            />
-          </div>
-          <div className="flex flex-col space-y-2">
-            <label className="text-sm font-semibold text-slate-600">性别 Gender</label>
-            <select 
-              className="block w-full rounded-xl border-slate-200 bg-white/50 p-3 text-slate-900 placeholder-slate-300 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 focus:bg-white transition-all shadow-sm"
-              value={formData.basic.gender}
-              onChange={(e) => updateBasic('gender', e.target.value)}
-            >
-              <option value="Male">Male / 男</option>
-              <option value="Female">Female / 女</option>
-            </select>
-          </div>
-           <MoneyInput 
-            label="年收入 Annual Income" 
-            value={formData.basic.annualIncome} 
-            onChange={(v) => updateBasic('annualIncome', v)} 
-          />
-        </SectionCard>
+        {/* Content Area */}
+        {activeTab === 'calculator' ? <CalculatorView /> : <DatabaseView />}
 
-        {/* 2. Liabilities */}
-        <SectionCard title="债务资料 Liabilities" icon={DollarSign} description="Outstanding debts / 现有贷款余额">
-          <MoneyInput label="房屋贷款 Housing Loan" value={formData.liabilities.housingLoan} onChange={(v) => updateLiability('housingLoan', v)} />
-          <MoneyInput label="汽车贷款 Car Loan" value={formData.liabilities.carLoan} onChange={(v) => updateLiability('carLoan', v)} />
-          <MoneyInput label="个人贷款 Personal Loan" value={formData.liabilities.personalLoan} onChange={(v) => updateLiability('personalLoan', v)} />
-          <MoneyInput label="信用卡欠款 Credit Card" value={formData.liabilities.creditCard} onChange={(v) => updateLiability('creditCard', v)} />
-          <MoneyInput label="生意贷款 Business Loan" value={formData.liabilities.businessLoan} onChange={(v) => updateLiability('businessLoan', v)} />
-          <MoneyInput label="学贷 Study Loan" value={formData.liabilities.studyLoan} onChange={(v) => updateLiability('studyLoan', v)} />
-          <MoneyInput label="其他 Other Liabilities" value={formData.liabilities.otherLiabilities} onChange={(v) => updateLiability('otherLiabilities', v)} />
-          
-          <div className="md:col-span-2 bg-indigo-50/50 rounded-xl p-4 flex justify-between items-center mt-2 border border-indigo-100">
-            <span className="font-semibold text-indigo-900">总债务 Total Liabilities</span>
-            <span className="font-bold text-xl text-indigo-700">
-                {formatCurrency((Object.values(formData.liabilities) as number[]).reduce((a, b) => a + b, 0))}
-            </span>
-          </div>
-        </SectionCard>
+        {/* Bottom Navigation */}
+        <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-slate-200 shadow-[0_-4px_20px_rgba(0,0,0,0.05)] z-50 safe-area-bottom">
+            <div className="flex justify-around items-center h-16 max-w-lg mx-auto">
+                <button 
+                    onClick={() => setActiveTab('calculator')}
+                    className={`flex flex-col items-center justify-center w-full h-full space-y-1 transition-all ${activeTab === 'calculator' ? 'text-indigo-600' : 'text-slate-400 hover:text-slate-600'}`}
+                >
+                    <Calculator className={`w-6 h-6 ${activeTab === 'calculator' ? 'fill-current opacity-20 stroke-[2.5px]' : ''}`} />
+                    <span className="text-[10px] font-bold tracking-wide">CALCULATOR</span>
+                </button>
+                
+                <div className="w-px h-8 bg-slate-100"></div>
 
-        {/* 3. Monthly Expenses */}
-        <SectionCard title="每月开销 Expenses" icon={PieChart} description="Monthly commitments / 每月固定支出">
-          <MoneyInput label="房贷供期 Housing Installment" value={formData.expenses.housingInstallment} onChange={(v) => updateExpense('housingInstallment', v)} />
-          <MoneyInput label="车贷供期 Car Installment" value={formData.expenses.carInstallment} onChange={(v) => updateExpense('carInstallment', v)} />
-          <MoneyInput label="信用卡还款 Credit Card" value={formData.expenses.creditCardPayment} onChange={(v) => updateExpense('creditCardPayment', v)} />
-          <MoneyInput label="伙食费 Food & Groceries" value={formData.expenses.foodGroceries} onChange={(v) => updateExpense('foodGroceries', v)} />
-          <MoneyInput label="水电费 Utilities" value={formData.expenses.utilities} onChange={(v) => updateExpense('utilities', v)} />
-          <MoneyInput label="电话网络 Phone & Internet" value={formData.expenses.phoneInternet} onChange={(v) => updateExpense('phoneInternet', v)} />
-          <MoneyInput label="子女教育 Children Education" value={formData.expenses.childrenEducation} onChange={(v) => updateExpense('childrenEducation', v)} />
-          <MoneyInput label="保费 Insurance Premium" value={formData.expenses.insurancePremium} onChange={(v) => updateExpense('insurancePremium', v)} />
-          <MoneyInput label="交通费 Transport" value={formData.expenses.transport} onChange={(v) => updateExpense('transport', v)} />
-          <MoneyInput label="父母家用 Parents Allowance" value={formData.expenses.parentsAllowance} onChange={(v) => updateExpense('parentsAllowance', v)} />
-          <MoneyInput label="托儿费 Childcare" value={formData.expenses.childcare} onChange={(v) => updateExpense('childcare', v)} />
-          <MoneyInput label="娱乐 Entertainment" value={formData.expenses.entertainment} onChange={(v) => updateExpense('entertainment', v)} />
-          <MoneyInput label="储蓄投资 Savings" value={formData.expenses.savings} onChange={(v) => updateExpense('savings', v)} />
-          <MoneyInput label="其他 Others" value={formData.expenses.others} onChange={(v) => updateExpense('others', v)} />
-
-          <div className="md:col-span-2 bg-orange-50/50 rounded-xl p-4 flex justify-between items-center mt-2 border border-orange-100">
-            <span className="font-semibold text-orange-900">总开销 Total Commitment</span>
-            <span className="font-bold text-xl text-orange-700">
-                {formatCurrency((Object.values(formData.expenses) as number[]).reduce((a, b) => a + b, 0))}
-            </span>
-          </div>
-        </SectionCard>
-
-        {/* 4. Existing Coverage */}
-        <SectionCard title="现有保障 Coverage" icon={ShieldAlert} description="Current insurance / 现有保单利益">
-            <MoneyInput label="人寿/终身残废 Life/TPD" value={formData.coverage.lifeTpd} onChange={(v) => updateCoverage('lifeTpd', v)} />
-            <MoneyInput label="严重疾病 Critical Illness" value={formData.coverage.criticalIllness} onChange={(v) => updateCoverage('criticalIllness', v)} />
-            <div className="flex flex-col space-y-2">
-                <label className="text-sm font-semibold text-slate-600">重疾收入替代年数 Income Replacement</label>
-                <div className="flex gap-4 mt-2">
-                    {[3, 4, 5].map((year) => (
-                        <button
-                            key={year}
-                            onClick={() => updateCoverage('ciIncomeReplacementYears', year)}
-                            className={`flex-1 py-3 px-4 rounded-xl text-sm font-bold transition-all shadow-sm ${
-                                formData.coverage.ciIncomeReplacementYears === year
-                                ? 'bg-indigo-600 text-white shadow-indigo-200 transform scale-105'
-                                : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-50'
-                            }`}
-                        >
-                            {year} Years / 年
-                        </button>
-                    ))}
-                </div>
-                <p className="text-xs text-slate-400 mt-1">Recommended period for full recovery / 建议恢复期</p>
+                <button 
+                    onClick={() => setActiveTab('database')}
+                    className={`flex flex-col items-center justify-center w-full h-full space-y-1 transition-all ${activeTab === 'database' ? 'text-indigo-600' : 'text-slate-400 hover:text-slate-600'}`}
+                >
+                    <Database className={`w-6 h-6 ${activeTab === 'database' ? 'fill-current opacity-20 stroke-[2.5px]' : ''}`} />
+                    <span className="text-[10px] font-bold tracking-wide">DATABASE</span>
+                </button>
             </div>
-        </SectionCard>
-
-        {/* Submit Action */}
-        <div className="sticky bottom-6 z-10 pt-4">
-            <button 
-                onClick={() => setShowResult(true)}
-                className="w-full bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 text-white font-bold py-5 rounded-2xl shadow-xl shadow-indigo-500/20 transform transition-all hover:scale-[1.02] flex items-center justify-center gap-3 text-lg"
-            >
-                Calculate Gap / 开始计算 <ArrowRight className="w-5 h-5" />
-            </button>
         </div>
-        
-        <div className="h-12"></div> {/* Spacer */}
-      </div>
     </div>
   );
 }

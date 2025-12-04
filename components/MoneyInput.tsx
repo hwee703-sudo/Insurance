@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 
 interface MoneyInputProps {
   label: string;
@@ -8,16 +8,46 @@ interface MoneyInputProps {
 }
 
 export const MoneyInput: React.FC<MoneyInputProps> = ({ label, value, onChange, placeholder = "0" }) => {
+  // Use local state to handle the input display string.
+  // This allows the user to type "10." without it being forced back to "10" immediately by the parent state.
+  const [displayValue, setDisplayValue] = useState(value === 0 ? '' : value.toString());
+
+  // Sync local state if the parent value changes externally (e.g., Reset button)
+  useEffect(() => {
+    const parsedLocal = parseFloat(displayValue);
+    const effectiveLocal = isNaN(parsedLocal) ? 0 : parsedLocal;
+
+    // Only update local state if the numeric value actually changed from the outside.
+    // This prevents cursor jumping or formatting issues while the user is typing.
+    if (value !== effectiveLocal) {
+      setDisplayValue(value === 0 ? '' : value.toString());
+    }
+  }, [value]);
+
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    // Allow empty string to let user clear input, otherwise parse
-    if (e.target.value === '') {
-      onChange(0);
-      return;
+    const inputValue = e.target.value;
+
+    // Regex Explanation:
+    // ^      : Start of string
+    // \d*    : Zero or more digits
+    // \.?    : Optional single decimal point
+    // \d*    : Zero or more digits
+    // $      : End of string
+    // This strictly matches only "123", "123.45", ".45", or empty string.
+    const isValidNumber = /^\d*\.?\d*$/.test(inputValue);
+
+    if (isValidNumber) {
+      setDisplayValue(inputValue);
+      
+      // Update parent state
+      if (inputValue === '' || inputValue === '.') {
+        onChange(0);
+      } else {
+        onChange(parseFloat(inputValue));
+      }
     }
-    const val = parseFloat(e.target.value);
-    if (!isNaN(val)) {
-      onChange(val);
-    }
+    // If not valid (e.g., user typed 'a' or a second '.'), 
+    // we simply ignore the event, so the invalid character never appears.
   };
 
   return (
@@ -28,11 +58,11 @@ export const MoneyInput: React.FC<MoneyInputProps> = ({ label, value, onChange, 
           <span className="text-slate-400 font-medium">RM</span>
         </div>
         <input
-          type="number"
-          min="0"
+          type="text" 
+          inputMode="decimal"
           className="block w-full rounded-xl border-slate-200 bg-white/50 pl-12 py-3 text-slate-900 placeholder-slate-300 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 focus:bg-white transition-all duration-200 sm:text-base font-medium shadow-sm"
           placeholder={placeholder}
-          value={value === 0 ? '' : value}
+          value={displayValue}
           onChange={handleChange}
         />
       </div>
