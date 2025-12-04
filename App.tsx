@@ -1,5 +1,6 @@
+
 import React, { useState, useMemo, useEffect } from 'react';
-import { User, DollarSign, ShieldAlert, PieChart, ArrowLeft, RefreshCcw, CheckCircle2, AlertCircle, Wallet, ChevronDown, Calculator, Database, Save, Trash2, FolderOpen, Search, FileText, Download, Share, PlusSquare, MoreVertical, X } from 'lucide-react';
+import { User, DollarSign, ShieldAlert, PieChart, ArrowLeft, RefreshCcw, CheckCircle2, AlertCircle, Wallet, ChevronDown, Calculator, Database, Save, Trash2, FolderOpen, Search, FileText } from 'lucide-react';
 import { FormData, BasicInfo, Liabilities, Expenses, ExistingCoverage, CalculationResult, SavedRecord } from './types';
 import { MoneyInput } from './components/MoneyInput';
 import { DateInput } from './components/DateInput';
@@ -71,7 +72,6 @@ interface CalculatorViewProps {
   updateExpense: (field: keyof Expenses, value: number) => void;
   updateCoverage: (field: keyof ExistingCoverage, value: any) => void;
   resetForm: () => void;
-  setShowInstallModal: (show: boolean) => void;
 }
 
 interface DatabaseViewProps {
@@ -253,8 +253,7 @@ const PdfTemplate: React.FC<PdfTemplateProps> = ({ formData, results }) => (
 const CalculatorView: React.FC<CalculatorViewProps> = ({ 
   formData, results, showResult, setShowResult, 
   isGeneratingPdf, handleExport, saveToDb,
-  updateBasic, updateLiability, updateExpense, updateCoverage, resetForm,
-  setShowInstallModal
+  updateBasic, updateLiability, updateExpense, updateCoverage, resetForm
 }) => {
   if (showResult) {
       const debtCoveragePercent = Math.min(100, (formData.coverage.lifeTpd / results.totalLiabilities) * 100) || 0;
@@ -440,17 +439,6 @@ const CalculatorView: React.FC<CalculatorViewProps> = ({
       <div className="pb-32 pt-8 px-4 sm:px-6">
         <div className="max-w-3xl mx-auto">
           
-          {/* Action Header for Install */}
-          <div className="absolute top-6 right-6">
-             <button
-                onClick={() => setShowInstallModal(true)}
-                className="p-2 bg-white/50 backdrop-blur hover:bg-white rounded-full text-slate-500 hover:text-indigo-600 transition-all shadow-sm"
-                title="Install App"
-             >
-                <Download className="w-5 h-5" />
-             </button>
-          </div>
-
           {/* Title Section */}
           <div className="text-center space-y-3 mb-8">
             <div className="inline-flex items-center justify-center p-3 bg-indigo-600 rounded-2xl shadow-lg shadow-indigo-500/30 mb-2">
@@ -671,58 +659,12 @@ const DatabaseView: React.FC<DatabaseViewProps> = ({ savedRecords, loadFromDb, d
     )
 };
 
-const InstallModal = ({ show, onClose }: { show: boolean; onClose: () => void }) => {
-    if (!show) return null;
-    return (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm animate-fade-in">
-            <div className="bg-white rounded-3xl shadow-2xl max-w-sm w-full p-6 relative">
-                <button onClick={onClose} className="absolute top-4 right-4 text-slate-400 hover:text-slate-600">
-                    <X className="w-6 h-6" />
-                </button>
-                
-                <h3 className="text-xl font-bold text-slate-800 mb-4 flex items-center gap-2">
-                    <Download className="w-6 h-6 text-indigo-600" />
-                    Install App
-                </h3>
-                
-                <div className="space-y-6">
-                    {/* iOS Instructions */}
-                    <div className="bg-slate-50 p-4 rounded-xl">
-                        <h4 className="font-bold text-slate-700 mb-2 flex items-center gap-2">
-                            <span>iPhone / iPad</span>
-                        </h4>
-                        <ol className="text-sm text-slate-600 space-y-2 list-decimal list-inside">
-                            <li>Tap the <Share className="w-4 h-4 inline mx-1" /> <strong>Share</strong> button below.</li>
-                            <li>Scroll down and tap <PlusSquare className="w-4 h-4 inline mx-1" /> <strong>Add to Home Screen</strong>.</li>
-                            <li>Tap <strong>Add</strong>.</li>
-                        </ol>
-                    </div>
-
-                    {/* Android Instructions */}
-                    <div className="bg-slate-50 p-4 rounded-xl">
-                        <h4 className="font-bold text-slate-700 mb-2">Android (Chrome)</h4>
-                        <ol className="text-sm text-slate-600 space-y-2 list-decimal list-inside">
-                            <li>Tap the <MoreVertical className="w-4 h-4 inline mx-1" /> <strong>Menu</strong> icon.</li>
-                            <li>Tap <strong>Install App</strong> or <strong>Add to Home screen</strong>.</li>
-                        </ol>
-                    </div>
-                </div>
-
-                <button onClick={onClose} className="w-full mt-6 py-3 bg-slate-100 text-slate-700 rounded-xl font-bold hover:bg-slate-200 transition-colors">
-                    Got it / 明白了
-                </button>
-            </div>
-        </div>
-    );
-};
-
 // --- Main App Component ---
 
 export default function App() {
   // --- Global State ---
   const [activeTab, setActiveTab] = useState<'calculator' | 'database'>('calculator');
   const [savedRecords, setSavedRecords] = useState<SavedRecord[]>([]);
-  const [showInstallModal, setShowInstallModal] = useState(false);
 
   // --- Calculator State ---
   const [formData, setFormData] = useState<FormData>(INITIAL_DATA);
@@ -838,9 +780,6 @@ export default function App() {
   return (
     <div className="min-h-screen bg-transparent font-sans text-slate-900">
         
-        {/* Install Modal */}
-        <InstallModal show={showInstallModal} onClose={() => setShowInstallModal(false)} />
-
         {/* Render PDF Template Hidden */}
         <PdfTemplate formData={formData} results={results} />
 
@@ -859,7 +798,6 @@ export default function App() {
             updateExpense={updateExpense}
             updateCoverage={updateCoverage}
             resetForm={resetForm}
-            setShowInstallModal={setShowInstallModal}
           />
         ) : (
           <DatabaseView 
