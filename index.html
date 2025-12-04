@@ -13,21 +13,26 @@
     <meta name="apple-mobile-web-app-title" content="Gap Calc" />
     <link rel="apple-touch-icon" href="https://cdn-icons-png.flaticon.com/512/2645/2645468.png" />
 
+    <!-- Tailwind CSS (Using CDN for simplicity) -->
     <script src="https://cdn.tailwindcss.com"></script>
-    <script type="importmap">
-    {
-      "imports": {
-        "recharts": "https://aistudiocdn.com/recharts@^3.5.1",
-        "lucide-react": "https://aistudiocdn.com/lucide-react@^0.555.0",
-        "react": "https://aistudiocdn.com/react@^19.2.0",
-        "react/": "https://aistudiocdn.com/react@^19.2.0/",
-        "react-dom/": "https://aistudiocdn.com/react-dom@^19.2.0/",
-        "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.0/package/xlsx.mjs"
-      }
-    }
-    </script>
-  </head>
+  <script type="importmap">
+{
+  "imports": {
+    "recharts": "https://aistudiocdn.com/recharts@^3.5.1",
+    "vite": "https://aistudiocdn.com/vite@^7.2.6",
+    "react-dom/": "https://aistudiocdn.com/react-dom@^19.2.1/",
+    "@vitejs/plugin-react": "https://aistudiocdn.com/@vitejs/plugin-react@^5.1.1",
+    "react": "https://aistudiocdn.com/react@^19.2.1",
+    "xlsx": "https://aistudiocdn.com/xlsx@^0.18.5",
+    "lucide-react": "https://aistudiocdn.com/lucide-react@^0.555.0",
+    "react/": "https://aistudiocdn.com/react@^19.2.1/"
+  }
+}
+</script>
+</head>
   <body class="bg-gradient-to-br from-slate-100 via-purple-50 to-indigo-100 text-slate-800 font-sans antialiased min-h-screen">
     <div id="root"></div>
+    <!-- Entry Point for Vite -->
+    <script type="module" src="/index.tsx"></script>
   </body>
 </html>
