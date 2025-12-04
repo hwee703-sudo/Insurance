@@ -583,7 +583,7 @@ const DatabaseView: React.FC<DatabaseViewProps> = ({ savedRecords, loadFromDb, d
     );
 
     return (
-        <div className="min-h-screen pb-32 bg-slate-50">
+        <div className="min-h-screen pb-32 bg-transparent">
             <header className="sticky top-0 z-20 bg-white/80 backdrop-blur-md border-b border-white/20 shadow-sm">
                 <div className="max-w-5xl mx-auto px-6 py-4">
                     <h2 className="text-xl font-bold text-slate-800 flex items-center gap-2">
@@ -620,7 +620,7 @@ const DatabaseView: React.FC<DatabaseViewProps> = ({ savedRecords, loadFromDb, d
                 ) : (
                     <div className="grid gap-4">
                         {filteredRecords.map((record) => (
-                            <div key={record.id} className="bg-white p-5 rounded-2xl shadow-sm border border-slate-100 flex items-center justify-between group active:scale-[0.99] transition-all">
+                            <div key={record.id} className="bg-white/80 backdrop-blur-sm p-5 rounded-2xl shadow-sm border border-slate-100 flex items-center justify-between group active:scale-[0.99] transition-all">
                                 <div className="flex-1 min-w-0" onClick={() => loadFromDb(record)}>
                                     <div className="flex items-center gap-2 mb-1">
                                         <h3 className="font-bold text-slate-800 truncate">{record.clientName}</h3>
@@ -777,7 +777,7 @@ export default function App() {
 
   // --- Main Render ---
   return (
-    <div className="min-h-screen bg-slate-50 font-sans text-slate-900">
+    <div className="min-h-screen bg-transparent font-sans text-slate-900">
         
         {/* Render PDF Template Hidden */}
         <PdfTemplate formData={formData} results={results} />
